@@ -35,6 +35,12 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import java.nio.file.Path;
+import java.sql.RowId;
+
+import javax.tools.FileObject;
+import javax.tools.ForwardingFileObject;
+
 /*
  * This OpMode illustrates the concept of driving a path based on encoder counts.
  * The code is structured as a LinearOpMode
@@ -81,11 +87,13 @@ public class ParkingByEncoders extends LinearOpMode {
     // For gearing UP, use a gear ratio less than 1.0. Note this will affect the direction of wheel rotation.
     static final double     COUNTS_PER_MOTOR_REV    = 1440 ;    // eg: TETRIX Motor Encoder
     static final double     DRIVE_GEAR_REDUCTION    = 1.0 ;     // No External Gearing.
-    static final double     WHEEL_DIAMETER_INCHES   = 4.0 ;     // For figuring circumference
+    static final double     WHEEL_DIAMETER_INCHES   = 5.52 ;     // For figuring circumference
     static final double     COUNTS_PER_INCH         = (COUNTS_PER_MOTOR_REV * DRIVE_GEAR_REDUCTION) /
                                                       (WHEEL_DIAMETER_INCHES * 3.1415);
     static final double     DRIVE_SPEED             = 0.6;
-    static final double     TURN_SPEED              = 0.5;
+    static final double     TURN_SPEED              = 0.6;
+    static final int        DeegreErroRate          = 42;
+
 
     @Override
     public void runOpMode() {
@@ -127,14 +135,19 @@ public class ParkingByEncoders extends LinearOpMode {
 
         // Step through each leg of the path,
         // Note: Reverse movement is obtained by setting a negative distance (not speed)
-//        encoderDrive(DRIVE_SPEED,  MetrToInches(1),  MetrToInches(1), 5.0);  // S1: Forward 47 Inches with 5 Sec timeout
-        encoderDrive(DRIVE_SPEED, MetrToInches(1),  -MetrToInches(1), 5.0);  // S1: Forward 47 Inches with 5 Sec timeout
-//        encoderDrive(TURN_SPEED,   12, -12, 4.0);  // S2: Turn Right 12 Inches with 4 Sec timeout
-//        encoderDrive(DRIVE_SPEED, -24, -24, 4.0);  // S3: Reverse 24 Inches with 4 Sec timeout
 
-        telemetry.addData("Path", "Complete");
+        left(DRIVE_SPEED, MetrToInches( (float) 0.5), 100);
+        right(DRIVE_SPEED, MetrToInches( (float) 0.3), 100);
+//        encoderDrive(DRIVE_SPEED, MetrToInches( (float) 0.4 ), MetrToInches( (float) 0.4 ), 100  );
+        forward(DRIVE_SPEED, MetrToInches((float) 0.4), 100);
+        left(DRIVE_SPEED, MetrToInches((float) 0.1), 100);
+//        encoderDrive(DRIVE_SPEED, MetrToInches( (float) -0.3 ), MetrToInches( (float) -0.3 ), 100  );
+        back(DRIVE_SPEED, MetrToInches((float) 0.3), 100);
+        right(DRIVE_SPEED, MetrToInches((float) 1), 100);
+
+
         telemetry.update();
-        sleep(1000);  // pause to display final telemetry message.
+//        sleep(1000);  // pause to display final telemetry message.
     }
 
     /*
@@ -206,8 +219,80 @@ public class ParkingByEncoders extends LinearOpMode {
 //            sleep(250);   // optional pause after each move.
         }
     }
-    public int MetrToInches(int Metr) {
+    public float MetrToInches(float Metr) {
         float inches = (float) (Metr * 39.4);
-        return java.lang.Math.round(inches);
+        return inches;
     }
+    public float DegreesToInches(int Deegre) {
+        float RoundLen = (float) (WHEEL_DIAMETER_INCHES * Math.PI);
+        return RoundLen * Deegre / 360;
+    }
+    private void left(double speed, double PathInMetres, int timeout) {
+        setMotorPowers(speed , -speed, speed, -speed, PathInMetres, timeout);
+    }
+
+    private void forward(double speed, double PathInMetres, int timeout) {
+        setMotorPowers(speed, speed, speed, speed, PathInMetres, timeout);
+        sleep(timeout);
+    }
+
+    private void back
+            (double speed, double PathInMetres, int timeout) {
+        setMotorPowers(-speed,-speed, -speed,-speed, PathInMetres, timeout);
+    }
+
+
+    private void right(double speed, double PathInMetres, int timeout) {
+        setMotorPowers(-speed, speed, -speed, speed, PathInMetres, timeout );
+    }
+
+private void setMotorPowers(double lbPower, double lfPower, double rfPower, double rbPower,
+                             double PathInMetres, double timeout) {
+    int newTarget = lf.getCurrentPosition() + (int) (PathInMetres * COUNTS_PER_INCH);
+
+    // Set target positions
+    lf.setTargetPosition((int) (newTarget * lfPower / Math.abs(lfPower)));
+    lb.setTargetPosition((int) (newTarget * lbPower / Math.abs(lbPower)));
+    rf.setTargetPosition((int) (newTarget * rfPower / Math.abs(rfPower)));
+    rb.setTargetPosition((int) (newTarget * rbPower / Math.abs(rbPower)));
+
+    // Set motor modes
+    lf.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+    rf.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+    lb.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+    rb.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+
+    // reset the timeout time and start motion.
+    runtime.reset();
+
+    // Set power levels
+    lf.setPower(lfPower);
+    rf.setPower(rfPower);
+    lb.setPower(lbPower);
+    rb.setPower(rbPower);
+
+    // Loop while motors are busy
+    while (opModeIsActive()  &&
+                   (runtime.seconds() < timeout) && (lf.isBusy() && rf.isBusy() && lb.isBusy() && rb.isBusy())) {
+        telemetry.addData("Running to", " %7d :%7d", newTarget, newTarget);
+        telemetry.addData("Currently at", " at %7d :%7d", lf.getCurrentPosition(), rf.getCurrentPosition());
+        telemetry.update();
+    }
+
+    // Stop all motion
+    lf.setPower(0);
+    rf.setPower(0);
+    lb.setPower(0);
+    rb.setPower(0);
+
+    // Reset motor modes
+    lf.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    rf.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    lb.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    rb.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    sleep((long) timeout);
 }
+
+}
+
+
